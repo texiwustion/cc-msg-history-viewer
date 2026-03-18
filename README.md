@@ -2,6 +2,8 @@
 
 A single-binary web app for browsing your Claude Code message history. Built with Rust (Axum) + SolidJS.
 
+![Screenshot](docs/screenshot.png)
+
 ## Features
 
 - Full-text search with keyword highlighting

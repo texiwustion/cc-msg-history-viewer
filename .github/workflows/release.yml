@@ -57,7 +57,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
-          path: frontend/dist/
+          path: static/
           retention-days: 1
 
   # ──────────────────────────────────────────────
@@ -91,7 +91,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: frontend-dist
-          path: frontend/dist
+          path: static/
         # 允许失败（frontend 尚未开发时）
         continue-on-error: true
 
@@ -140,10 +140,7 @@ jobs:
           mkdir -p "${ARTIFACT_DIR}/${ARTIFACT_NAME}"
           cp "${BIN_PATH}" "${ARTIFACT_DIR}/${ARTIFACT_NAME}/"
 
-          # 如果有前端产物一并打包
-          if [ -d "frontend/dist" ]; then
-            cp -r frontend/dist "${ARTIFACT_DIR}/${ARTIFACT_NAME}/"
-          fi
+          # rust_embed 已内嵌前端，无需额外打包 static/
 
           cd "${ARTIFACT_DIR}"
           tar -czf "${ARTIFACT_NAME}.tar.gz" "${ARTIFACT_NAME}/"
@@ -172,7 +169,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: '*-unknown-*|*-apple-*|*-pc-*'
+          pattern: '*-*-*-*'
           merge-multiple: true
 
       - name: List artifacts
@@ -218,7 +215,7 @@ jobs:
             # 打开浏览器访问 http://localhost:3001
             ```
 
-            > The archive includes the `dist/` frontend assets alongside the binary (if frontend is built).
+            > Single binary — the frontend is embedded via `rust-embed`. No extra files needed.
           files: artifacts/*.tar.gz
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}

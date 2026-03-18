@@ -43,6 +43,7 @@ impl MessageStore {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn query_messages(
         &self,
         project: Option<&str>,
@@ -123,12 +124,14 @@ impl MessageStore {
                     continue;
                 }
             }
-            let entry = map.entry(m.session_id.as_str()).or_insert_with(|| SessionInfo {
-                session_id: m.session_id.clone(),
-                project: m.project.clone(),
-                first_ts: m.timestamp,
-                count: 0,
-            });
+            let entry = map
+                .entry(m.session_id.as_str())
+                .or_insert_with(|| SessionInfo {
+                    session_id: m.session_id.clone(),
+                    project: m.project.clone(),
+                    first_ts: m.timestamp,
+                    count: 0,
+                });
             entry.count += 1;
             if m.timestamp < entry.first_ts {
                 entry.first_ts = m.timestamp;

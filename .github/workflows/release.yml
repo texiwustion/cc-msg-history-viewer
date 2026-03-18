@@ -78,7 +78,7 @@ jobs:
             runner: ubuntu-latest
             archive: tar.gz
           - target: x86_64-apple-darwin
-            runner: macos-13          # Intel runner
+            runner: macos-latest      # Cross-compile on ARM
             archive: tar.gz
           - target: aarch64-apple-darwin
             runner: macos-latest      # Apple Silicon runner

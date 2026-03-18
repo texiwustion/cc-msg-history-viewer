@@ -1,7 +1,8 @@
 [package]
 name = "cc-msg-viewer"
-version = "1.0.0"
+version = "1.0.2"
 edition = "2021"
+license = "MIT"
 
 [dependencies]
 axum = { version = "0.7", features = ["macros"] }

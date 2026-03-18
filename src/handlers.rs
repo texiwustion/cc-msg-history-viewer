@@ -1,11 +1,15 @@
+use std::sync::{Arc, RwLock};
+
 use axum::{
     extract::{Query, State},
     Json,
 };
 use serde::Deserialize;
 
-use crate::store::MessageStore;
 use crate::models::{MessagesResponse, ProjectInfo, SessionInfo, Stats};
+use crate::store::MessageStore;
+
+type SharedStore = Arc<RwLock<MessageStore>>;
 
 #[derive(Debug, Deserialize)]
 pub struct MessagesQuery {
@@ -35,9 +39,10 @@ pub struct SessionsQuery {
 const MAX_LIMIT: usize = 500;
 
 pub async fn get_messages(
-    State(store): State<MessageStore>,
+    State(store): State<SharedStore>,
     Query(q): Query<MessagesQuery>,
 ) -> Json<MessagesResponse> {
+    let store = store.read().unwrap().clone();
     let resp = store.query_messages(
         q.project.as_deref(),
         q.session.as_deref(),
@@ -50,17 +55,20 @@ pub async fn get_messages(
     Json(resp)
 }
 
-pub async fn get_projects(State(store): State<MessageStore>) -> Json<Vec<ProjectInfo>> {
+pub async fn get_projects(State(store): State<SharedStore>) -> Json<Vec<ProjectInfo>> {
+    let store = store.read().unwrap().clone();
     Json(store.projects())
 }
 
 pub async fn get_sessions(
-    State(store): State<MessageStore>,
+    State(store): State<SharedStore>,
     Query(q): Query<SessionsQuery>,
 ) -> Json<Vec<SessionInfo>> {
+    let store = store.read().unwrap().clone();
     Json(store.sessions(q.project.as_deref()))
 }
 
-pub async fn get_stats(State(store): State<MessageStore>) -> Json<Stats> {
+pub async fn get_stats(State(store): State<SharedStore>) -> Json<Stats> {
+    let store = store.read().unwrap().clone();
     Json(store.stats())
 }

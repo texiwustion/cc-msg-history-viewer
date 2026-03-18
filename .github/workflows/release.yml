@@ -1,0 +1,225 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+env:
+  CARGO_TERM_COLOR: always
+  BINARY_NAME: cc-msg-viewer
+
+permissions:
+  contents: write
+
+jobs:
+  # ──────────────────────────────────────────────
+  # 1. Build frontend (only if it exists)
+  # ──────────────────────────────────────────────
+  build-frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check if frontend exists
+        id: check
+        run: |
+          if [ -d "frontend" ] && [ -f "frontend/package.json" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup pnpm
+        if: steps.check.outputs.exists == 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+
+      - name: Setup Node.js
+        if: steps.check.outputs.exists == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install & Build
+        if: steps.check.outputs.exists == 'true'
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+        working-directory: frontend
+
+      - name: Upload frontend dist
+        if: steps.check.outputs.exists == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+          retention-days: 1
+
+  # ──────────────────────────────────────────────
+  # 2. Cross-compile Rust binary
+  # ──────────────────────────────────────────────
+  build-binary:
+    name: Build ${{ matrix.target }}
+    needs: build-frontend
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            archive: tar.gz
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-latest
+            archive: tar.gz
+          - target: x86_64-apple-darwin
+            runner: macos-13          # Intel runner
+            archive: tar.gz
+          - target: aarch64-apple-darwin
+            runner: macos-latest      # Apple Silicon runner
+            archive: tar.gz
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download frontend dist
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+        # 允许失败（frontend 尚未开发时）
+        continue-on-error: true
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Configure cross-linker (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          mkdir -p .cargo
+          cat >> .cargo/config.toml <<'EOF'
+          [target.aarch64-unknown-linux-gnu]
+          linker = "aarch64-linux-gnu-gcc"
+          EOF
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ matrix.target }}-cargo-
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          BIN_PATH="target/${{ matrix.target }}/release/${BINARY_NAME}"
+          ARTIFACT_DIR="artifact"
+          ARTIFACT_NAME="${BINARY_NAME}-${TAG}-${{ matrix.target }}"
+
+          mkdir -p "${ARTIFACT_DIR}/${ARTIFACT_NAME}"
+          cp "${BIN_PATH}" "${ARTIFACT_DIR}/${ARTIFACT_NAME}/"
+
+          # 如果有前端产物一并打包
+          if [ -d "frontend/dist" ]; then
+            cp -r frontend/dist "${ARTIFACT_DIR}/${ARTIFACT_NAME}/"
+          fi
+
+          cd "${ARTIFACT_DIR}"
+          tar -czf "${ARTIFACT_NAME}.tar.gz" "${ARTIFACT_NAME}/"
+          echo "ARTIFACT=${ARTIFACT_NAME}.tar.gz" >> $GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: artifact/*.tar.gz
+          retention-days: 1
+
+  # ──────────────────────────────────────────────
+  # 3. Create GitHub Release
+  # ──────────────────────────────────────────────
+  release:
+    name: Create Release
+    needs: build-binary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 需要完整历史来生成 changelog
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: '*-unknown-*|*-apple-*|*-pc-*'
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lh artifacts/
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          # 获取上一个 tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..HEAD"
+          else
+            RANGE="HEAD"
+          fi
+
+          CHANGELOG=$(git log ${RANGE} \
+            --pretty=format:"- %s ([%h](https://github.com/${{ github.repository }}/commit/%H))" \
+            --no-merges)
+
+          echo "CHANGELOG<<EOF" >> $GITHUB_ENV
+          echo "$CHANGELOG" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body: |
+            ## Changes
+
+            ${{ env.CHANGELOG }}
+
+            ## Installation
+
+            Download the binary for your platform, extract it, and run:
+
+            ```bash
+            # Linux / macOS
+            tar -xzf cc-msg-viewer-*.tar.gz
+            cd cc-msg-viewer-*/
+            ./cc-msg-viewer
+            # 打开浏览器访问 http://localhost:3001
+            ```
+
+            > The archive includes the `dist/` frontend assets alongside the binary (if frontend is built).
+          files: artifacts/*.tar.gz
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: false

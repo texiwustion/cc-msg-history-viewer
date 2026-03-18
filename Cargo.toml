@@ -1,6 +1,6 @@
 [package]
 name = "cc-msg-viewer"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 
 [dependencies]
@@ -14,6 +14,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
+rust-embed = { version = "8", features = ["mime-guess"] }
+mime_guess = "2"
+clap = { version = "4", features = ["derive", "env"] }
+notify = "6"
 
 [dev-dependencies]
 tempfile = "3"

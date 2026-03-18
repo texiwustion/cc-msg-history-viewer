@@ -1,16 +1,20 @@
-import { createEffect, createResource, createSignal, For, Show } from 'solid-js'
+import { createEffect, createMemo, createResource, createSignal, For, Show } from 'solid-js'
 import { createVirtualizer } from '@tanstack/solid-virtual'
 import { fetchMessages, type Message } from '../api/client'
 import { selectedProject, selectedSession, searchQuery, fromTs, toTs } from '../stores/filters'
 import { MessageItem } from './MessageItem'
+import dayjs from 'dayjs'
 
 const PAGE_SIZE = 100
+
+type DateRow = { kind: 'date'; date: string }
+type MessageRow = { kind: 'message'; message: Message }
+type Row = DateRow | MessageRow
 
 export function MessageList() {
   let containerRef: HTMLDivElement | undefined
 
   const [offset, setOffset] = createSignal(0)
-  // Track the offset that is currently loading to prevent duplicate fetches
   const [loadingOffset, setLoadingOffset] = createSignal(-1)
 
   const params = () => ({
@@ -37,7 +41,7 @@ export function MessageList() {
     setTotal(0)
   })
 
-  // Accumulate pages; use the snapshot of offset at response time to decide append vs replace
+  // Accumulate pages
   createEffect(() => {
     const d = data()
     if (!d) return
@@ -51,12 +55,28 @@ export function MessageList() {
     setLoadingOffset(-1)
   })
 
+  // Build rows with date dividers
+  const rows = createMemo<Row[]>(() => {
+    const msgs = allMessages()
+    const result: Row[] = []
+    let lastDate = ''
+    for (const msg of msgs) {
+      const date = dayjs(msg.timestamp).format('YYYY-MM-DD')
+      if (date !== lastDate) {
+        result.push({ kind: 'date', date })
+        lastDate = date
+      }
+      result.push({ kind: 'message', message: msg })
+    }
+    return result
+  })
+
   const rowVirtualizer = createVirtualizer({
     get count() {
-      return allMessages().length
+      return rows().length
     },
     getScrollElement: () => containerRef ?? null,
-    estimateSize: () => 80,
+    estimateSize: (i) => (rows()[i]?.kind === 'date' ? 32 : 80),
     overscan: 10,
   })
 
@@ -89,9 +109,9 @@ export function MessageList() {
         <div style={{ height: `${rowVirtualizer.getTotalSize()}px`, position: 'relative' }}>
           <For each={rowVirtualizer.getVirtualItems()}>
             {(vItem) => {
-              const msg = () => allMessages()[vItem.index]
+              const row = () => rows()[vItem.index]
               return (
-                <Show when={msg()}>
+                <Show when={row()}>
                   <div
                     style={{
                       position: 'absolute',
@@ -103,7 +123,24 @@ export function MessageList() {
                     data-index={vItem.index}
                     ref={(el) => rowVirtualizer.measureElement(el)}
                   >
-                    <MessageItem message={msg()} highlight={searchQuery() || undefined} />
+                    <Show
+                      when={row()!.kind === 'message'}
+                      fallback={
+                        <div style={{
+                          padding: '0.3rem 1rem',
+                          'font-size': '0.72rem',
+                          'font-weight': '600',
+                          color: '#a6e3a1',
+                          background: '#181825',
+                          'border-bottom': '1px solid #313244',
+                          'letter-spacing': '0.04em',
+                        }}>
+                          {(row() as DateRow).date}
+                        </div>
+                      }
+                    >
+                      <MessageItem message={(row() as MessageRow).message} highlight={searchQuery() || undefined} />
+                    </Show>
                   </div>
                 </Show>
               )
